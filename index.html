@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Ujian Interaktif</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .fade-in { animation: fadeIn 0.4s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+        .print-container { background: white !important; color: black !important; }
+        .print-container * { color: black !important; border-color: #e5e7eb !important; }
+    </style>
+</head>
+<body class="text-gray-800 min-h-screen flex flex-col">
+
+    <!-- Container Utama -->
+    <div id="app" class="flex-grow flex flex-col relative w-full h-full min-h-screen">
+        <!-- Konten akan dirender oleh JavaScript di sini -->
+    </div>
+
+    <!-- Modal Global untuk Pesan -->
+    <div id="global-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full fade-in text-center">
+            <div id="modal-icon" class="text-4xl mb-4"></div>
+            <h3 id="modal-title" class="text-lg font-bold text-gray-900 mb-2"></h3>
+            <p id="modal-message" class="text-gray-600 mb-6"></p>
+            <button onclick="closeModal()" class="w-full bg-blue-600 text-white font-medium py-2 px-4 rounded-lg hover:bg-blue-700 transition">Mengerti</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Konfigurasi Environment Firebase dari Web IDE
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'exam-app-123';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            // Fallback config is needed but usually provided by environment
+            apiKey: "mock-key", projectId: "mock-project"
+        };
+        
+        let app, db, auth;
+        let isFirebaseReady = false;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            isFirebaseReady = true;
+        } catch (e) {
+            console.error("Firebase initialization failed:", e);
+        }
+
+        const questionsDatabase = [
+            // 5 Pilihan Ganda (PG)
+            { id: 'pg1', type: 'pg', text: 'Tujuan utama dari proses belajar menurut pandangan psikologi pendidikan adalah...', options: ['Perubahan perilaku yang relatif permanen', 'Menghafal materi pelajaran sebanyak mungkin', 'Mendapatkan nilai tinggi saat ujian', 'Membuat guru merasa senang dan bangga'], correct: 'Perubahan perilaku yang relatif permanen' },
+            { id: 'pg2', type: 'pg', text: 'Siapakah tokoh utama yang terkenal dengan eksperimen anjing pelivasi dalam pengembangan teori behaviorisme?', options: ['Ivan Pavlov', 'Jean Piaget', 'Lev Vygotsky', 'B.F. Skinner'], correct: 'Ivan Pavlov' },
+            { id: 'pg3', type: 'pg', text: 'Menurut teori belajar kognitif, proses belajar lebih menitikberatkan pada...', options: ['Proses mental dan pemahaman makna', 'Pemberian stimulus dan pembentukan respon', 'Pembentukan kebiasaan melalui pengulangan', 'Pemberian hukuman dan hadiah'], correct: 'Proses mental dan pemahaman makna' },
+            { id: 'pg4', type: 'pg', text: 'Konsep "Zone of Proximal Development" (ZPD) yang menekankan bantuan sosial dalam belajar diperkenalkan oleh...', options: ['Lev Vygotsky', 'John Dewey', 'Albert Bandura', 'Edward Thorndike'], correct: 'Lev Vygotsky' },
+            { id: 'pg5', type: 'pg', text: 'Indikator utama yang menunjukkan kualitas pembelajaran yang baik dan bermakna di kelas adalah...', options: ['Siswa aktif berpartisipasi dan memahami konsep', 'Suasana kelas selalu hening tanpa suara', 'Guru mendominasi dengan metode ceramah', 'Seluruh siswa dapat menyelesaikan ujian dengan cepat'], correct: 'Siswa aktif berpartisipasi dan memahami konsep' },
+            
+            // 5 Pilihan Ganda Kompleks (PGK)
+            { id: 'pgk1', type: 'pgk', text: 'Manakah dari pernyataan berikut yang SESUAI dengan prinsip dasar teori Konstruktivisme? (Pilih lebih dari satu)', options: ['Siswa membangun pengetahuannya sendiri secara aktif', 'Guru berperan utama sebagai fasilitator dan mediator', 'Pengetahuan dipindahkan secara utuh dari kepala guru ke siswa', 'Belajar adalah proses pasif menerima informasi'], correct: ['Siswa membangun pengetahuannya sendiri secara aktif', 'Guru berperan utama sebagai fasilitator dan mediator'] },
+            { id: 'pgk2', type: 'pgk', text: 'Ciri-ciri implementasi pembelajaran yang berlandaskan teori behaviorisme meliputi... (Pilih lebih dari satu)', options: ['Pemberian penguatan (reinforcement) positif atau negatif', 'Fokus pada perubahan perilaku yang dapat diamati dan diukur', 'Menekankan pada insight atau pemahaman mendalam secara mandiri', 'Membebaskan siswa belajar tanpa panduan struktur'], correct: ['Pemberian penguatan (reinforcement) positif atau negatif', 'Fokus pada perubahan perilaku yang dapat diamati dan diukur'] },
+            { id: 'pgk3', type: 'pgk', text: 'Komponen penting yang digunakan dalam mengukur kualitas pembelajaran meliputi... (Pilih lebih dari satu)', options: ['Relevansi materi pembelajaran dengan kehidupan nyata', 'Tingkat interaksi yang aktif antara guru dan siswa', 'Banyaknya tugas yang diberikan tanpa adanya umpan balik', 'Penggunaan fasilitas mewah tanpa mempertimbangkan fungsi'], correct: ['Relevansi materi pembelajaran dengan kehidupan nyata', 'Tingkat interaksi yang aktif antara guru dan siswa'] },
+            { id: 'pgk4', type: 'pgk', text: 'Tahapan perkembangan kognitif manusia menurut Jean Piaget meliputi tahap... (Pilih lebih dari satu)', options: ['Sensorimotor', 'Praoperasional', 'Operasional Formal', 'Psikoseksual Laten'], correct: ['Sensorimotor', 'Praoperasional', 'Operasional Formal'] },
+            { id: 'pgk5', type: 'pgk', text: 'Faktor internal dari dalam diri siswa yang sangat mempengaruhi keberhasilan proses belajar adalah... (Pilih lebih dari satu)', options: ['Motivasi intrinsik dan rasa ingin tahu', 'Kondisi fisiologis dan kesehatan jasmani', 'Fasilitas dan lingkungan fisik sekolah', 'Perhatian dan dukungan sosial keluarga'], correct: ['Motivasi intrinsik dan rasa ingin tahu', 'Kondisi fisiologis dan kesehatan jasmani'] },
+
+            // 5 Menjodohkan (Match)
+            { id: 'm1', type: 'match', text: 'Pasangkan tokoh berikut dengan konsep/teori utamanya: B.F. Skinner', options: ['Operant Conditioning', 'Classical Conditioning', 'Scaffolding', 'Asimilasi & Akomodasi'], correct: 'Operant Conditioning' },
+            { id: 'm2', type: 'match', text: 'Pasangkan istilah kognitif berikut dengan maknanya: Asimilasi', options: ['Mengintegrasikan informasi baru ke dalam skema kognitif yang sudah ada', 'Mengubah skema lama karena informasi baru sama sekali berbeda', 'Menghafalkan informasi tanpa memahaminya', 'Memberikan hukuman atas kesalahan'], correct: 'Mengintegrasikan informasi baru ke dalam skema kognitif yang sudah ada' },
+            { id: 'm3', type: 'match', text: 'Pasangkan konsep berikut dengan teori pendukungnya: Scaffolding', options: ['Konstruktivisme Sosial', 'Behaviorisme Murni', 'Humanisme', 'Koneksionisme'], correct: 'Konstruktivisme Sosial' },
+            { id: 'm4', type: 'match', text: 'Pasangkan pola dasar belajar berikut dengan alirannya: Stimulus-Respon', options: ['Behaviorisme', 'Kognitivisme', 'Konstruktivisme', 'Sibernetik'], correct: 'Behaviorisme' },
+            { id: 'm5', type: 'match', text: 'Pasangkan pilar kualitas pembelajaran dengan deskripsinya: Relevansi', options: ['Materi yang diajarkan sesuai dengan kebutuhan nyata dan perkembangan zaman', 'Penerapan kedisiplinan tingkat tinggi di lingkungan sekolah', 'Penggunaan teknologi terbaru tanpa evaluasi hasil', 'Kecepatan guru dalam menghabiskan target kurikulum'], correct: 'Materi yang diajarkan sesuai dengan kebutuhan nyata dan perkembangan zaman' },
+
+            // 5 Isian Singkat
+            { id: 'is1', type: 'short', text: 'Proses penyesuaian skema kognitif yang sudah ada karena adanya informasi baru yang tidak cocok dengan skema lama disebut...', correct: ['akomodasi'] },
+            { id: 'is2', type: 'short', text: 'Teori yang menyatakan bahwa belajar adalah murni perubahan tingkah laku yang dapat diamati, diukur, dan dinilai secara konkret adalah teori...', correct: ['behaviorisme', 'teori behaviorisme'] },
+            { id: 'is3', type: 'short', text: 'Menurut Vygotsky, bantuan sementara yang diberikan kepada siswa oleh guru atau teman sebaya yang lebih mampu untuk mencapai pemahaman disebut...', correct: ['scaffolding', 'perancah'] },
+            { id: 'is4', type: 'short', text: 'Tokoh terkenal yang membagi tahapan perkembangan kognitif anak mulai dari sensorimotor hingga operasional formal bernama...', correct: ['piaget', 'jean piaget'] },
+            { id: 'is5', type: 'short', text: 'Perubahan perilaku yang relatif permanen pada diri seseorang sebagai hasil dari pengalaman, interaksi, atau latihan disebut proses...', correct: ['belajar'] }
+        ];
+
+        // State Management
+        let appState = {
+            role: null, // 'student' | 'teacher'
+            studentData: { name: '', classId: '' },
+            examQuestions: [], // Shuffled questions for the current student
+            answers: {}, // Format: { questionId: answerData }
+            teacherData: [], // Submissions data from Firestore
+            unsubscribeTeacher: null,
+            currentQuestionIndex: 0, // Menyimpan indeks soal saat ini
+            timerInterval: null,
+            timeRemaining: 1800 // 30 menit (30 * 60 = 1800 detik)
+        };
+
+        // Constants
+        const TEACHER_CODE = "Azmi17";
+        const CLASSES = ["01GSDP002", "01GSDP001", "01GSDE001"];
+        
+        // DOM Elements setup
+        const appContainer = document.getElementById('app');
+
+        // Modal Helper
+        window.showModal = (title, message, isError = false) => {
+            const modal = document.getElementById('global-modal');
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-icon').innerHTML = isError ? 
+                '<i class="fas fa-exclamation-circle text-red-500"></i>' : 
+                '<i class="fas fa-check-circle text-green-500"></i>';
+            modal.classList.remove('hidden');
+        };
+
+        window.closeModal = () => {
+            document.getElementById('global-modal').classList.add('hidden');
+        };
+
+        // Utility: Format Waktu (MM:SS)
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = (seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        // Utility: Shuffle Array
+        function shuffleArray(array) {
+            let curId = array.length;
+            while (0 !== curId) {
+                let randId = Math.floor(Math.random() * curId);
+                curId -= 1;
+                let tmp = array[curId];
+                array[curId] = array[randId];
+                array[randId] = tmp;
+            }
+            return array;
+        }
+
+        function renderLogin() {
+            appContainer.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-4 relative">
+                    <div class="glass-panel p-8 rounded-2xl shadow-xl w-full max-w-md fade-in mt-20 sm:mt-0">
+                        <div class="text-center mb-8">
+                            <h1 class="text-3xl font-bold text-gray-800 mb-2">Portal Ujian</h1>
+                            <p class="text-gray-500">Silakan pilih peran Anda untuk melanjutkan</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mb-6">
+                            <button onclick="window.selectRole('student')" class="py-4 border-2 border-blue-500 rounded-xl text-blue-600 hover:bg-blue-50 font-semibold transition flex flex-col items-center gap-2">
+                                <i class="fas fa-user-graduate text-2xl"></i>
+                                Siswa
+                            </button>
+                            <button onclick="window.selectRole('teacher')" class="py-4 border-2 border-purple-500 rounded-xl text-purple-600 hover:bg-purple-50 font-semibold transition flex flex-col items-center gap-2">
+                                <i class="fas fa-chalkboard-teacher text-2xl"></i>
+                                Guru
+                            </button>
+                        </div>
+                        <div id="form-container"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.selectRole = (role) => {
+            appState.role = role;
+            const container = document.getElementById('form-container');
+            container.innerHTML = ''; // clear
+
+            if (role === 'student') {
+                container.innerHTML = `
+                    <div class="fade-in space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap</label>
+                            <input type="text" id="student-name" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Masukkan nama Anda">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Pilih Kelas</label>
+                            <select id="student-class" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <option value="">-- Pilih Kelas --</option>
+                                ${CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+                            </select>
+                        </div>
+                        <button onclick="window.startStudentExam()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition mt-4">
+                            Mulai Latihan
+                        </button>
+                    </div>
+                `;
+            } else if (role === 'teacher') {
+                container.innerHTML = `
+                    <div class="fade-in space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Kode Akses Guru</label>
+                            <input type="password" id="teacher-code" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none" placeholder="Masukkan kode akses">
+                        </div>
+                        <button onclick="window.loginTeacher()" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg shadow-md transition mt-4">
+                            Masuk Dashboard
+                        </button>
+                    </div>
+                `;
+            }
+        };
+
+        window.loginTeacher = async () => {
+            const code = document.getElementById('teacher-code').value;
+            if (code !== TEACHER_CODE) {
+                showModal('Akses Ditolak', 'Kode akses guru salah!', true);
+                return;
+            }
+            await authUser();
+            renderTeacherDashboard();
+        };
+
+        window.startStudentExam = async () => {
+            const name = document.getElementById('student-name').value.trim();
+            const classId = document.getElementById('student-class').value;
+            
+            if (!name || !classId) {
+                showModal('Data Tidak Lengkap', 'Mohon lengkapi nama dan kelas Anda.', true);
+                return;
+            }
+
+            appState.studentData = { name, classId };
+            appState.currentQuestionIndex = 0; // Reset index soal
+            
+            // Randomize Questions & Options for this student session
+            appState.examQuestions = shuffleArray([...questionsDatabase]).map(q => {
+                let newQ = { ...q };
+                if (newQ.options) {
+                    newQ.options = shuffleArray([...newQ.options]); // Shuffle choices
+                }
+                return newQ;
+            });
+            
+            appState.answers = {};
+            appState.timeRemaining = 1800; // Reset waktu ke 30 menit (1800 detik)
+
+            // Hapus interval lama jika ada (mencegah bug timer ganda)
+            if (appState.timerInterval) clearInterval(appState.timerInterval);
+            
+            // Mulai Hitung Mundur
+            appState.timerInterval = setInterval(() => {
+                appState.timeRemaining--;
+                const timerEl = document.getElementById('exam-timer');
+                
+                if (timerEl) {
+                    timerEl.innerHTML = `<i class="fas fa-clock mr-1"></i> ${formatTime(appState.timeRemaining)}`;
+                    
+                    // Jika waktu tersisa <= 5 menit (300 detik), ubah warna jadi merah & berkedip
+                    if (appState.timeRemaining <= 300) {
+                        timerEl.classList.remove('bg-blue-700');
+                        timerEl.classList.add('bg-red-600', 'animate-pulse');
+                    }
+                }
+
+                // Jika Waktu habis
+                if (appState.timeRemaining <= 0) {
+                    clearInterval(appState.timerInterval);
+                    showModal('Waktu Habis', 'Waktu pengerjaan telah habis. Jawaban Anda akan otomatis dikumpulkan dalam 3 detik.', false);
+                    setTimeout(() => window.submitExam(true), 3000); // Paksa kumpulkan jawaban
+                }
+            }, 1000);
+
+            await authUser();
+            renderExam();
+        };
+
+        async function authUser() {
+            if (!isFirebaseReady) return;
+            try {
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth error:", error);
+                showModal("Error Autentikasi", "Gagal terhubung ke server.", true);
+            }
+        }
+
+        function renderExam() {
+            const qIndex = appState.currentQuestionIndex;
+            const q = appState.examQuestions[qIndex];
+            const totalQ = appState.examQuestions.length;
+            
+            let inputHtml = '';
+            let currentAns = appState.answers[q.id];
+            
+            if (q.type === 'pg') {
+                inputHtml = `<div class="space-y-2 mt-4">`;
+                q.options.forEach(opt => {
+                    const checked = currentAns === opt ? 'checked' : '';
+                    inputHtml += `
+                        <label class="flex items-center space-x-3 p-4 border rounded-xl hover:bg-blue-50 cursor-pointer transition">
+                            <input type="radio" name="${q.id}" value="${opt}" ${checked} class="h-4 w-4 text-blue-600 focus:ring-blue-500" onchange="window.saveAnswer('${q.id}', '${opt}')">
+                            <span class="text-gray-700 font-medium">${opt}</span>
+                        </label>
+                    `;
+                });
+                inputHtml += `</div>`;
+            } 
+            else if (q.type === 'pgk') {
+                let currentAnsArr = currentAns || [];
+                inputHtml = `<div class="space-y-2 mt-4 text-sm text-blue-600 font-medium bg-blue-50 p-2 rounded mb-3"><i class="fas fa-info-circle mr-1"></i> Pilih semua jawaban yang benar:</div><div class="space-y-2">`;
+                q.options.forEach(opt => {
+                    const checked = currentAnsArr.includes(opt) ? 'checked' : '';
+                    inputHtml += `
+                        <label class="flex items-center space-x-3 p-4 border rounded-xl hover:bg-blue-50 cursor-pointer transition">
+                            <input type="checkbox" name="${q.id}" value="${opt}" ${checked} class="h-4 w-4 text-blue-600 rounded focus:ring-blue-500" onchange="window.saveArrayAnswer('${q.id}', this)">
+                            <span class="text-gray-700 font-medium">${opt}</span>
+                        </label>
+                    `;
+                });
+                inputHtml += `</div>`;
+            }
+            else if (q.type === 'match') {
+                inputHtml = `<div class="mt-5"><select onchange="window.saveAnswer('${q.id}', this.value)" class="w-full p-4 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white font-medium text-gray-700 transition shadow-sm">
+                    <option value="">-- Pilih Pasangan yang Tepat --</option>
+                    ${q.options.map(opt => `<option value="${opt}" ${currentAns === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                </select></div>`;
+            }
+            else if (q.type === 'short') {
+                let safeVal = currentAns ? currentAns.replace(/"/g, '&quot;') : '';
+                inputHtml = `<div class="mt-5">
+                    <input type="text" value="${safeVal}" oninput="window.saveAnswer('${q.id}', this.value)" placeholder="Ketik jawaban singkat di sini..." class="w-full p-4 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-gray-700 transition shadow-sm">
+                </div>`;
+            }
+
+            // Area Navigasi
+            let navButtons = `<div class="flex justify-between items-center mt-8 pt-6 border-t border-gray-100">`;
+            
+            if (qIndex > 0) {
+                navButtons += `<button onclick="window.prevQuestion()" class="px-6 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition focus:outline-none focus:ring-2 focus:ring-gray-300">Kembali</button>`;
+            } else {
+                navButtons += `<div></div>`;
+            }
+
+            if (qIndex < totalQ - 1) {
+                navButtons += `<button onclick="window.nextQuestion()" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500">Lanjut <i class="fas fa-arrow-right ml-2"></i></button>`;
+            } else {
+                navButtons += `<button onclick="window.submitExam()" class="px-8 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition shadow-lg focus:outline-none focus:ring-2 focus:ring-green-500"><i class="fas fa-paper-plane mr-2"></i> Kumpulkan</button>`;
+            }
+            
+            navButtons += `</div>`;
+
+            appContainer.innerHTML = `
+                <div class="bg-blue-600 text-white p-4 sticky top-0 z-10 shadow-md">
+                    <div class="container mx-auto flex justify-between items-center max-w-3xl">
+                        <div>
+                            <h2 class="font-bold text-xl">Latihan UTS</h2>
+                            <p class="text-sm text-blue-100 font-medium">${appState.studentData.name} | Kelas: ${appState.studentData.classId}</p>
+                        </div>
+                        <div class="flex gap-2 items-center">
+                            <div id="exam-timer" class="text-sm ${appState.timeRemaining <= 300 ? 'bg-red-600 animate-pulse' : 'bg-blue-700'} px-4 py-2 rounded-full font-bold shadow-inner min-w-[85px] text-center">
+                                <i class="fas fa-clock mr-1"></i> ${formatTime(appState.timeRemaining)}
+                            </div>
+                            <div class="text-sm bg-blue-700 px-4 py-2 rounded-full font-bold shadow-inner hidden sm:block">
+                                Progres: ${qIndex + 1} / ${totalQ}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="container mx-auto max-w-3xl p-4 py-8 fade-in">
+                    <div class="bg-white p-6 md:p-10 rounded-2xl shadow-lg border border-gray-100 min-h-[400px] flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-xl font-semibold text-gray-800 leading-relaxed mb-6">${q.text}</h3>
+                            ${inputHtml}
+                        </div>
+                        ${navButtons}
+                    </div>
+                </div>
+            `;
+        }
+
+        window.nextQuestion = () => {
+            if (appState.currentQuestionIndex < appState.examQuestions.length - 1) {
+                appState.currentQuestionIndex++;
+                renderExam();
+            }
+        };
+
+        window.prevQuestion = () => {
+            if (appState.currentQuestionIndex > 0) {
+                appState.currentQuestionIndex--;
+                renderExam();
+            }
+        };
+
+        window.saveAnswer = (qId, val) => {
+            appState.answers[qId] = val;
+        };
+
+        window.saveArrayAnswer = (qId, checkboxElem) => {
+            if (!appState.answers[qId]) appState.answers[qId] = [];
+            const val = checkboxElem.value;
+            if (checkboxElem.checked) {
+                appState.answers[qId].push(val);
+            } else {
+                appState.answers[qId] = appState.answers[qId].filter(item => item !== val);
+            }
+        };
+
+        window.submitExam = async (isForced = false) => {
+            if (!isForced && Object.keys(appState.answers).length < 20) {
+                // Warning if not all answered
+                showModal('Belum Lengkap', 'Tolong jawab seluruh 20 pertanyaan sebelum mengumpulkan.', true);
+                return;
+            }
+
+            // Hentikan timer jika siswa selesai sebelum waktu habis
+            if (appState.timerInterval) {
+                clearInterval(appState.timerInterval);
+                appState.timerInterval = null;
+            }
+
+            // Calculate score
+            let correctCount = 0;
+            let detailAnswers = []; // Save detailed data for teacher
+
+            appState.examQuestions.forEach(q => {
+                let isCorrect = false;
+                let userAnswer = appState.answers[q.id] || (q.type === 'pgk' ? [] : '');
+                
+                if (q.type === 'pg' || q.type === 'match') {
+                    isCorrect = (userAnswer === q.correct);
+                } 
+                else if (q.type === 'pgk') {
+                    let uAnsSorted = [...userAnswer].sort();
+                    let cAnsSorted = [...q.correct].sort();
+                    isCorrect = (uAnsSorted.length === cAnsSorted.length && uAnsSorted.every((val, i) => val === cAnsSorted[i]));
+                } 
+                else if (q.type === 'short') {
+                    let cleanedAns = userAnswer.toString().toLowerCase().trim();
+                    isCorrect = q.correct.includes(cleanedAns);
+                }
+
+                if (isCorrect) correctCount++;
+
+                detailAnswers.push({
+                    text: q.text,
+                    type: q.type,
+                    userAnswer: userAnswer,
+                    correctAnswer: q.correct,
+                    isCorrect: isCorrect
+                });
+            });
+
+            // Pembulatan nilai akhir menggunakan Math.round()
+            const finalScore = Math.round((correctCount / 20) * 100);
+
+            // Save to Firestore
+            try {
+                if (isFirebaseReady && auth.currentUser) {
+                    const resultsRef = collection(db, 'artifacts', appId, 'public', 'data', 'exam_results');
+                    await addDoc(resultsRef, {
+                        userId: auth.currentUser.uid,
+                        name: appState.studentData.name,
+                        classId: appState.studentData.classId,
+                        score: finalScore,
+                        correctCount: correctCount,
+                        details: detailAnswers,
+                        timestamp: serverTimestamp()
+                    });
+                }
+            } catch (e) {
+                console.error("Failed saving to DB:", e);
+                // Still show success to student even if db fails to prevent panic, or show error.
+            }
+
+            // Show Result Screen
+            appContainer.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-4 bg-gray-50">
+                    <div class="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-lg text-center fade-in border-t-8 border-blue-500">
+                        <i class="fas fa-check-circle text-6xl text-green-500 mb-6"></i>
+                        <h2 class="text-3xl font-bold text-gray-800 mb-2">Terima Kasih!</h2>
+                        <p class="text-gray-600 mb-6">Jawaban Anda telah berhasil direkam.</p>
+                        <div class="bg-blue-50 p-4 rounded-xl inline-block mb-6">
+                            <p class="text-sm text-blue-800 font-medium">${appState.studentData.name} - ${appState.studentData.classId}</p>
+                        </div>
+                        <div>
+                            <button onclick="window.returnToHome()" class="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition shadow-sm">
+                                <i class="fas fa-home mr-2"></i> Kembali ke Halaman Utama
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.returnToHome = () => {
+            // Reset state siswa agar bersih saat kembali ke beranda
+            appState.studentData = { name: '', classId: '' };
+            appState.answers = {};
+            appState.currentQuestionIndex = 0;
+            renderLogin();
+        };
+
+        function renderTeacherDashboard() {
+            appContainer.innerHTML = `
+                <div class="min-h-screen bg-gray-100 flex flex-col">
+                    <header class="bg-purple-700 text-white p-4 shadow-md">
+                        <div class="container mx-auto flex justify-between items-center">
+                            <h1 class="font-bold text-xl"><i class="fas fa-chart-line mr-2"></i> Dashboard Guru</h1>
+                            <button onclick="window.logoutTeacher()" class="bg-purple-800 hover:bg-purple-900 px-4 py-2 rounded text-sm transition">Keluar</button>
+                        </div>
+                    </header>
+                    <main class="flex-grow container mx-auto p-4 py-8">
+                        <div class="bg-white rounded-xl shadow p-6 border border-gray-200">
+                            <div class="flex justify-between items-center mb-6">
+                                <h2 class="text-xl font-bold text-gray-800">Rekapitulasi Hasil Ujian</h2>
+                                <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-3 py-1 rounded-full" id="total-students">0 Siswa</span>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-gray-50 border-b-2 border-gray-200">
+                                            <th class="p-4 font-semibold text-gray-600">Nama Siswa</th>
+                                            <th class="p-4 font-semibold text-gray-600">Kelas</th>
+                                            <th class="p-4 font-semibold text-gray-600">Waktu Submit</th>
+                                            <th class="p-4 font-semibold text-gray-600">Nilai Akhir</th>
+                                            <th class="p-4 font-semibold text-gray-600 text-center">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="teacher-table-body" class="divide-y divide-gray-100">
+                                        <tr><td colspan="5" class="p-8 text-center text-gray-400">Memuat data...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+                <!-- Modal Detail Siswa -->
+                <div id="detail-modal" class="fixed inset-0 bg-black bg-opacity-60 z-50 hidden flex justify-center p-4 overflow-y-auto pt-10 pb-10">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-fit max-h-full flex flex-col fade-in">
+                        <div class="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-xl sticky top-0 z-10">
+                            <h3 class="text-xl font-bold text-gray-800">Detail Evaluasi Siswa</h3>
+                            <div class="space-x-2">
+                                <button onclick="window.downloadPDF()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow text-sm font-medium transition"><i class="fas fa-file-pdf mr-1"></i> Cetak PDF</button>
+                                <button onclick="window.closeDetailModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded shadow text-sm font-medium transition"><i class="fas fa-times"></i></button>
+                            </div>
+                        </div>
+                        <!-- Memisahkan scroll dari area yang diprint agar html2pdf menangkap seluruh panjang elemen -->
+                        <div class="overflow-y-auto w-full" style="max-height: 75vh;">
+                            <div id="print-area" class="p-8 print-container bg-white w-full">
+                                <!-- Detail content goes here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Setup Real-time Listener
+            if (isFirebaseReady && auth.currentUser) {
+                const resultsRef = collection(db, 'artifacts', appId, 'public', 'data', 'exam_results');
+                
+                appState.unsubscribeTeacher = onSnapshot(resultsRef, (snapshot) => {
+                    let docs = [];
+                    snapshot.forEach(doc => {
+                        docs.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    // Sort by timestamp descending in memory (avoid complex query index)
+                    docs.sort((a, b) => {
+                        const timeA = a.timestamp ? a.timestamp.toMillis() : 0;
+                        const timeB = b.timestamp ? b.timestamp.toMillis() : 0;
+                        return timeB - timeA;
+                    });
+                    
+                    appState.teacherData = docs;
+                    updateTeacherTable();
+                }, (error) => {
+                    console.error("Firestore error:", error);
+                    showModal("Error", "Gagal memuat data dari database.", true);
+                });
+            }
+        }
+
+        function updateTeacherTable() {
+            const tbody = document.getElementById('teacher-table-body');
+            document.getElementById('total-students').innerText = `${appState.teacherData.length} Siswa`;
+            
+            if (appState.teacherData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-400">Belum ada siswa yang mengumpulkan ujian.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = appState.teacherData.map((data, index) => {
+                const date = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString('id-ID') : 'Baru saja';
+                const scoreClass = data.score >= 70 ? 'text-green-600' : 'text-red-500';
+                return `
+                    <tr class="hover:bg-purple-50 transition">
+                        <td class="p-4 font-medium text-gray-800">${data.name}</td>
+                        <td class="p-4 text-gray-600">${data.classId}</td>
+                        <td class="p-4 text-sm text-gray-500">${date}</td>
+                        <td class="p-4 font-bold ${scoreClass}">${data.score}</td>
+                        <td class="p-4 text-center">
+                            <button onclick="window.viewStudentDetail(${index})" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1 rounded text-sm font-medium transition">Detail</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        window.logoutTeacher = () => {
+            if (appState.unsubscribeTeacher) {
+                appState.unsubscribeTeacher();
+            }
+            renderLogin();
+        };
+
+        window.viewStudentDetail = (index) => {
+            const data = appState.teacherData[index];
+            const modal = document.getElementById('detail-modal');
+            const printArea = document.getElementById('print-area');
+            
+            const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString('id-ID') : '-';
+
+            let detailsHtml = `
+                <div class="mb-8 border-b-2 border-gray-800 pb-4">
+                    <h1 class="text-3xl font-bold text-center mb-2">Laporan Hasil Ujian</h1>
+                    <div class="grid grid-cols-2 gap-4 mt-6 text-sm">
+                        <div><span class="font-semibold w-24 inline-block">Nama Lengkap</span>: ${data.name}</div>
+                        <div><span class="font-semibold w-24 inline-block">Kelas</span>: ${data.classId}</div>
+                        <div><span class="font-semibold w-24 inline-block">Waktu</span>: ${dateStr}</div>
+                        <div><span class="font-semibold w-24 inline-block">Nilai Akhir</span>: <span class="font-bold text-lg">${data.score}</span>/100</div>
+                    </div>
+                </div>
+                <div class="space-y-6">
+            `;
+
+            data.details.forEach((ans, i) => {
+                const isCorrect = ans.isCorrect;
+                const icon = isCorrect ? '<i class="fas fa-check text-green-600"></i>' : '<i class="fas fa-times text-red-500"></i>';
+                const bgClass = isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
+                
+                let userAnsStr = Array.isArray(ans.userAnswer) ? ans.userAnswer.join(', ') : ans.userAnswer;
+                if(!userAnsStr || userAnsStr.length === 0) userAnsStr = '<i>(Kosong)</i>';
+                
+                let correctAnsStr = Array.isArray(ans.correctAnswer) ? ans.correctAnswer.join(' ATAU ') : ans.correctAnswer;
+                if(ans.type === 'pgk') correctAnsStr = ans.correctAnswer.join(', ');
+
+                detailsHtml += `
+                    <div class="p-4 rounded border ${bgClass}">
+                        <div class="flex gap-3">
+                            <div class="mt-1">${icon}</div>
+                            <div class="flex-grow">
+                                <p class="font-medium text-gray-900 mb-2">${i+1}. ${ans.text}</p>
+                                <p class="text-sm text-gray-700"><strong>Jawaban Siswa:</strong> <span class="${isCorrect?'text-green-700':'text-red-600 line-through'}">${userAnsStr}</span></p>
+                                ${!isCorrect ? `<p class="text-sm text-gray-700 mt-1"><strong>Jawaban Benar:</strong> <span class="text-green-700">${correctAnsStr}</span></p>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            detailsHtml += `</div>`;
+            printArea.innerHTML = detailsHtml;
+            
+            // Set temporary attribute for filename
+            printArea.setAttribute('data-student-name', data.name);
+            modal.classList.remove('hidden');
+        };
+
+        window.closeDetailModal = () => {
+            document.getElementById('detail-modal').classList.add('hidden');
+        };
+
+        window.downloadPDF = () => {
+            const printArea = document.getElementById('print-area');
+            const studentName = printArea.getAttribute('data-student-name');
+            const opt = {
+                margin:       [10, 10, 10, 10],
+                filename:     `Hasil_Ujian_${studentName.replace(/\s+/g, '_')}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, scrollY: 0 },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } // Mencegah teks/soal terpotong di tengah halaman
+            };
+            
+            // Change button text temporarily
+            const btn = event.currentTarget;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
+            
+            html2pdf().set(opt).from(printArea).save().then(() => {
+                btn.innerHTML = originalText;
+            });
+        };
+
+        // Initialize App UI
+        renderLogin();
+
+    </script>
+</body>
+</html>
